@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>俄罗斯方块：陨石与护盾防御</title>
+    <style>
+        :root {
+            --bg-dark: #05050a;
+            --neon-blue: #00f3ff;
+            --neon-pink: #ff00ff;
+            --danger-red: #ff3e3e;
+            --shield-color: #0077ff;
+            --double-color: #ffcc00;
+        }
+
+        body {
+            background-color: var(--bg-dark);
+            color: #fff;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .game-container {
+            display: flex;
+            gap: 20px;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.03);
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            position: relative;
+            box-shadow: 0 0 50px rgba(0,0,0,1);
+        }
+
+        .canvas-area {
+            position: relative;
+            width: 300px;
+            height: 600px;
+        }
+
+        canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            border-radius: 4px;
+        }
+
+        #main-canvas { z-index: 2; border: 2px solid #222; }
+        #fx-canvas { z-index: 3; pointer-events: none; }
+
+        .side-bar {
+            width: 180px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .card {
+            background: rgba(0, 0, 0, 0.5);
+            padding: 12px;
+            border-radius: 12px;
+            border-left: 4px solid var(--neon-blue);
+        }
+
+        .card-label { font-size: 0.7rem; color: #777; text-transform: uppercase; letter-spacing: 1px; }
+        .card-value { font-size: 1.6rem; font-weight: bold; margin-top: 5px; }
+
+        .shield-slots {
+            display: flex;
+            gap: 8px;
+            margin-top: 8px;
+        }
+
+        .shield-icon {
+            width: 22px;
+            height: 26px;
+            background: var(--shield-color);
+            clip-path: polygon(50% 0%, 100% 25%, 100% 75%, 50% 100%, 0% 75%, 0% 25%);
+            transition: all 0.3s ease;
+            box-shadow: 0 0 10px var(--shield-color);
+            position: relative;
+        }
+
+        .shield-icon.empty {
+            background: #222;
+            box-shadow: none;
+            opacity: 0.3;
+            transform: scale(0.8);
+        }
+
+        .status-tag {
+            font-size: 0.65rem;
+            padding: 2px 6px;
+            border-radius: 4px;
+            display: inline-block;
+            margin-top: 5px;
+            font-weight: bold;
+        }
+
+        .tag-double { background: var(--double-color); color: #000; display: none; }
+
+        .overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(0,0,0,0.9);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border-radius: 20px;
+            text-align: center;
+        }
+
+        button {
+            background: #fff; color: #000; border: none; padding: 12px 35px;
+            font-size: 1rem; font-weight: bold; cursor: pointer; border-radius: 50px;
+            margin-top: 20px; transition: 0.2s;
+        }
+
+        button:hover { background: var(--neon-blue); transform: scale(1.05); }
+
+        .shake-anim { animation: shake 0.3s ease-in-out; }
+        @keyframes shake {
+            0%, 100% { transform: translate(0,0); }
+            25% { transform: translate(-4px, 2px); }
+            50% { transform: translate(4px, -2px); }
+            75% { transform: translate(-2px, 1px); }
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container" class="game-container">
+        <div class="canvas-area">
+            <canvas id="main-canvas" width="300" height="600"></canvas>
+            <canvas id="fx-canvas" width="300" height="600"></canvas>
+            
+            <div id="start-screen" class="overlay">
+                <h1 style="color: var(--neon-blue); letter-spacing: 2px;">SHIELD TETRIS</h1>
+                <p style="font-size: 0.8rem; color: #888;">得分达到30后刷新道具，100后陨石降临</p>
+                <button onclick="initGame()">开始挑战</button>
+            </div>
+        </div>
+
+        <div class="side-bar">
+            <div class="card" style="border-left-color: var(--shield-color);">
+                <div class="card-label">护盾储备 (MAX 2)</div>
+                <div class="shield-slots" id="shield-ui">
+                    <div class="shield-icon empty"></div>
+                    <div class="shield-icon empty"></div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-label">当前分数</div>
+                <div id="score-text" class="card-value">0</div>
+                <div id="double-tag" class="status-tag tag-double">2X SCORE ACTIVE</div>
+            </div>
+
+            <div class="card">
+                <div class="card-label">难度等级</div>
+                <div id="level-text" class="card-value">1</div>
+            </div>
+
+            <div class="card">
+                <div class="card-label">下一个</div>
+                <canvas id="next-canvas" width="120" height="120" style="position:relative;"></canvas>
+            </div>
+
+            <div style="font-size: 0.7rem; color: #444; line-height: 1.4; margin-top: auto;">
+                方向键：移动/旋转<br>
+                空格：瞬间硬降<br>
+                P：暂停游戏
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const gridSize = 30;
+        const mCanvas = document.getElementById('main-canvas');
+        const mCtx = mCanvas.getContext('2d');
+        const fCanvas = document.getElementById('fx-canvas');
+        const fCtx = fCanvas.getContext('2d');
+        const nCanvas = document.getElementById('next-canvas');
+        const nCtx = nCanvas.getContext('2d');
+        const container = document.getElementById('game-container');
+
+        mCtx.scale(gridSize, gridSize);
+        nCtx.scale(gridSize, gridSize);
+
+        const pieceColors = [null, '#00f3ff', '#ff00ff', '#ffea00', '#00ff00', '#ff3e3e', '#ff9d00', '#9d00ff'];
+
+        let board = Array.from({length: 20}, () => Array(10).fill(0));
+        let player = {
+            pos: {x: 0, y: 0},
+            matrix: null,
+            next: null,
+            score: 0,
+            level: 1,
+            shields: 0,
+            doubleMode: false
+        };
+
+        let activeItems = [];
+        let currentMeteor = null;
+        let particles = [];
+        let dropTimer = 0;
+        let dropSpeed = 1000;
+        let lastTimestamp = 0;
+        let isRunning = false;
+        let meteorCooldown = 0;
+
+        class Particle {
+            constructor(x, y, color, sizeMult = 1) {
+                this.x = x; this.y = y; this.color = color;
+                this.size = (Math.random() * 4 + 2) * sizeMult;
+                this.vx = (Math.random() - 0.5) * 10;
+                this.vy = (Math.random() - 0.5) * 10;
+                this.alpha = 1;
+                this.decay = 0.02 + Math.random() * 0.02;
+            }
+            update() { this.x += this.vx; this.y += this.vy; this.vy += 0.3; this.alpha -= this.decay; }
+            draw() {
+                fCtx.globalAlpha = Math.max(0, this.alpha);
+                fCtx.fillStyle = this.color;
+                fCtx.fillRect(this.x, this.y, this.size, this.size);
+            }
+        }
+
+        class Meteor {
+            constructor() {
+                this.targetX = Math.floor(Math.random() * 10);
+                this.x = this.targetX * gridSize + gridSize/2;
+                this.y = -50;
+                this.state = 'warning';
+                this.ticks = 0;
+            }
+            update() {
+                if (this.state === 'warning') {
+                    this.ticks++;
+                    if (this.ticks > 80) this.state = 'falling';
+                } else {
+                    this.y += 12;
+                    const gy = Math.floor(this.y / gridSize);
+                    if (gy >= 19 || (board[gy+1] && board[gy+1][this.targetX] !== 0)) {
+                        this.impact();
+                    }
+                }
+            }
+            draw() {
+                if (this.state === 'warning') {
+                    fCtx.save();
+                    fCtx.strokeStyle = `rgba(255, 0, 0, ${Math.abs(Math.sin(Date.now()/100))})`;
+                    fCtx.setLineDash([5, 5]);
+                    fCtx.beginPath(); fCtx.moveTo(this.x, 0); fCtx.lineTo(this.x, 600); fCtx.stroke();
+                    fCtx.restore();
+                } else {
+                    fCtx.fillStyle = '#ff3e3e';
+                    fCtx.beginPath(); fCtx.arc(this.x, this.y, 12, 0, Math.PI*2); fCtx.fill();
+                    for(let i=0; i<2; i++) particles.push(new Particle(this.x, this.y, '#ff6600', 0.5));
+                }
+            }
+            impact() {
+                if (player.shields > 0) {
+                    player.shields--;
+                    updateShieldUI();
+                    for(let i=0; i<50; i++) {
+                        const p = new Particle(this.x, this.y, '#0077ff', 1.5);
+                        p.vx *= 1.5; p.vy *= 1.5;
+                        particles.push(p);
+                    }
+                } else {
+                    container.classList.add('shake-anim');
+                    setTimeout(() => container.classList.remove('shake-anim'), 300);
+                    const gy = Math.floor(this.y / gridSize);
+                    const radius = 2;
+                    for (let dy = -radius; dy <= radius; dy++) {
+                        for (let dx = -radius; dx <= radius; dx++) {
+                            let tx = this.targetX + dx, ty = gy + dy;
+                            if (board[ty] && board[ty][tx] !== undefined && board[ty][tx] !== 0) {
+                                const c = pieceColors[board[ty][tx]];
+                                for(let i=0; i<8; i++) particles.push(new Particle(tx*gridSize+15, ty*gridSize+15, c));
+                                board[ty][tx] = 0;
+                            }
+                        }
+                    }
+                    for(let i=0; i<40; i++) particles.push(new Particle(this.x, this.y, '#ffaa00', 2));
+                }
+                currentMeteor = null;
+            }
+        }
+
+        function createPiece(type) {
+            const shapes = {
+                'I':[[0,1,0,0],[0,1,0,0],[0,1,0,0],[0,1,0,0]],
+                'L':[[0,2,0],[0,2,0],[0,2,2]],
+                'J':[[0,3,0],[0,3,0],[3,3,0]],
+                'O':[[4,4],[4,4]],
+                'Z':[[5,5,0],[0,5,5],[0,0,0]],
+                'S':[[0,6,6],[6,6,0],[0,0,0]],
+                'T':[[0,7,0],[7,7,7],[0,0,0]]
+            };
+            return shapes[type];
+        }
+
+        function spawnItem() {
+            if (player.score < 30) return;
+            const x = Math.floor(Math.random() * 10);
+            const y = Math.floor(Math.random() * 12) + 4;
+            if (board[y][x] === 0 && !activeItems.some(i => i.x === x && i.y === y)) {
+                activeItems.push({x, y, type: Math.random() > 0.6 ? 'shield' : 'double'});
+            }
+        }
+
+        function handleItemPickup() {
+            if (!player.matrix) return;
+            player.matrix.forEach((row, y) => {
+                row.forEach((val, x) => {
+                    if (val !== 0) {
+                        const px = player.pos.x + x;
+                        const py = player.pos.y + y;
+                        for (let i = activeItems.length - 1; i >= 0; i--) {
+                            const item = activeItems[i];
+                            if (item.x === px && item.y === py) {
+                                if (item.type === 'shield') {
+                                    if (player.shields < 2) player.shields++; else player.score += 10;
+                                    updateShieldUI();
+                                } else {
+                                    player.doubleMode = true;
+                                }
+                                activeItems.splice(i, 1);
+                                updateScoreUI();
+                                for(let j=0; j<15; j++) particles.push(new Particle(px*gridSize+15, py*gridSize+15, item.type==='shield'?'#0077ff':'#ffcc00'));
+                            }
+                        }
+                    }
+                });
+            });
+        }
+
+        function drawItems() {
+            activeItems.forEach(it => {
+                fCtx.save();
+                fCtx.translate(it.x * gridSize + 15, it.y * gridSize + 15);
+                fCtx.shadowBlur = 10;
+                if(it.type === 'shield') {
+                    fCtx.fillStyle = '#0077ff'; fCtx.shadowColor = '#0077ff';
+                    fCtx.beginPath(); fCtx.moveTo(0,-10); fCtx.lineTo(10,-5); fCtx.lineTo(10,5); fCtx.lineTo(0,10); fCtx.lineTo(-10,5); fCtx.lineTo(-10,-5); fCtx.fill();
+                } else {
+                    fCtx.fillStyle = '#ffcc00'; fCtx.shadowColor = '#ffcc00';
+                    fCtx.beginPath(); for(let i=0;i<5;i++){ fCtx.lineTo(Math.cos((18+i*72)/180*Math.PI)*10,-Math.sin((18+i*72)/180*Math.PI)*10); fCtx.lineTo(Math.cos((54+i*72)/180*Math.PI)*5,-Math.sin((54+i*72)/180*Math.PI)*5);} fCtx.fill();
+                }
+                fCtx.restore();
+            });
+        }
+
+        function sweepRows() {
+            let rowsCleared = 0;
+            outer: for (let y = board.length - 1; y > 0; --y) {
+                for (let x = 0; x < board[y].length; ++x) { if (board[y][x] === 0) continue outer; }
+                const row = board.splice(y, 1)[0].fill(0);
+                board.unshift(row);
+                ++y; rowsCleared++;
+            }
+            if (rowsCleared > 0) {
+                let gain = rowsCleared * 10 * player.level;
+                if (player.doubleMode) { gain *= 2; player.doubleMode = false; }
+                player.score += gain;
+                player.level = Math.floor(player.score / 200) + 1;
+                dropSpeed = Math.max(100, 1000 - (player.level - 1) * 120);
+                updateScoreUI();
+                if (Math.random() > 0.5) spawnItem();
+            }
+        }
+
+        function updateScoreUI() {
+            document.getElementById('score-text').innerText = player.score;
+            document.getElementById('level-text').innerText = player.level;
+            document.getElementById('double-tag').style.display = player.doubleMode ? 'inline-block' : 'none';
+        }
+
+        function updateShieldUI() {
+            const slots = document.getElementById('shield-ui').children;
+            for(let i=0; i<2; i++) {
+                slots[i].className = i < player.shields ? 'shield-icon' : 'shield-icon empty';
+            }
+        }
+
+        function collide(arena, p) {
+            const [m, o] = [p.matrix, p.pos];
+            if (!m) return false;
+            for (let y = 0; y < m.length; ++y) {
+                for (let x = 0; x < m[y].length; ++x) {
+                    if (m[y][x] !== 0 && (arena[y+o.y] && arena[y+o.y][x+o.x]) !== 0) return true;
+                }
+            }
+            return false;
+        }
+
+        function playerReset() {
+            const types = 'ILJOTSZ';
+            player.matrix = player.next || createPiece(types[Math.floor(Math.random()*7)]);
+            player.next = createPiece(types[Math.floor(Math.random()*7)]);
+            player.pos.y = 0;
+            player.pos.x = 5 - Math.floor(player.matrix[0].length/2);
+            if (collide(board, player)) {
+                isRunning = false;
+                document.getElementById('start-screen').style.display = 'flex';
+                document.querySelector('#start-screen h1').innerText = "GAME OVER";
+            }
+            nCtx.clearRect(0,0,10,10);
+            drawMatrix(player.next, {x:1, y:1}, nCtx);
+        }
+
+        function drawMatrix(matrix, offset, ctx) {
+            if (!matrix) return;
+            matrix.forEach((row, y) => {
+                row.forEach((val, x) => {
+                    if (val !== 0) {
+                        ctx.fillStyle = pieceColors[val];
+                        ctx.fillRect(x + offset.x, y + offset.y, 1, 1);
+                        ctx.strokeStyle = 'rgba(0,0,0,0.4)'; ctx.lineWidth = 0.05;
+                        ctx.strokeRect(x+offset.x, y+offset.y, 1, 1);
+                    }
+                });
+            });
+        }
+
+        function loop(time = 0) {
+            if (!isRunning) return;
+            const dt = time - lastTimestamp;
+            lastTimestamp = time;
+
+            dropTimer += dt;
+            if (dropTimer > dropSpeed) {
+                player.pos.y++;
+                if (collide(board, player)) {
+                    player.pos.y--;
+                    player.matrix.forEach((row, y) => {
+                        row.forEach((v, x) => { if(v!==0) board[y+player.pos.y][x+player.pos.x] = v; });
+                    });
+                    playerReset();
+                    sweepRows();
+                }
+                dropTimer = 0;
+            }
+
+            handleItemPickup();
+
+            if (player.score >= 100 && !currentMeteor) {
+                meteorCooldown += dt;
+                if (meteorCooldown > 10000) { currentMeteor = new Meteor(); meteorCooldown = 0; }
+            }
+
+            render();
+            requestAnimationFrame(loop);
+        }
+
+        function render() {
+            mCtx.fillStyle = '#000'; mCtx.fillRect(0,0,10,20);
+            drawMatrix(board, {x:0, y:0}, mCtx);
+            drawMatrix(player.matrix, player.pos, mCtx);
+
+            fCtx.clearRect(0,0,300,600);
+            drawItems();
+            
+            // 修复点：增加对 currentMeteor 的零值安全检查
+            if (currentMeteor && typeof currentMeteor.update === 'function') { 
+                currentMeteor.update(); 
+                // 再次检查防止在 update 中被设为 null
+                if (currentMeteor) currentMeteor.draw(); 
+            }
+
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.update();
+                p.draw();
+                if (p.alpha <= 0) particles.splice(i, 1);
+            }
+        }
+
+        document.addEventListener('keydown', e => {
+            if (!isRunning) return;
+            if (e.key === 'ArrowLeft') { player.pos.x--; if(collide(board, player)) player.pos.x++; }
+            if (e.key === 'ArrowRight') { player.pos.x++; if(collide(board, player)) player.pos.x--; }
+            if (e.key === 'ArrowDown') { player.pos.y++; if(collide(board, player)) player.pos.y--; dropTimer = 0; }
+            if (e.key === 'ArrowUp') {
+                const old = player.pos.x;
+                const m = player.matrix;
+                for(let y=0; y<m.length; y++) for(let x=0; x<y; x++) [m[x][y], m[y][x]] = [m[y][x], m[x][y]];
+                m.forEach(r => r.reverse());
+                let offset = 1;
+                while(collide(board, player)) {
+                    player.pos.x += offset;
+                    offset = -(offset + (offset > 0 ? 1 : -1));
+                    if(Math.abs(offset) > m[0].length) { m.forEach(r => r.reverse()); for(let y=0; y<m.length; y++) for(let x=0; x<y; x++) [m[x][y], m[y][x]] = [m[y][x], m[x][y]]; player.pos.x = old; return; }
+                }
+            }
+            if (e.key === ' ') {
+                while(!collide(board, player)) player.pos.y++;
+                player.pos.y--;
+                player.matrix.forEach((row, y) => { row.forEach((v, x) => { if(v!==0) board[y+player.pos.y][x+player.pos.x] = v; }); });
+                playerReset();
+                sweepRows();
+            }
+        });
+
+        function initGame() {
+            board = Array.from({length: 20}, () => Array(10).fill(0));
+            player.score = 0; player.level = 1; player.shields = 0; player.doubleMode = false;
+            activeItems = []; currentMeteor = null; particles = [];
+            isRunning = true;
+            document.getElementById('start-screen').style.display = 'none';
+            updateScoreUI(); updateShieldUI();
+            playerReset();
+            lastTimestamp = performance.now();
+            loop();
+        }
+    </script>
+</body>
+</html>
